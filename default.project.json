@@ -24,8 +24,7 @@
     "Workspace": {
       "$className": "Workspace",
       "$properties": {
-        "Gravity": 140,
-        "FilteringEnabled": true
+        "Gravity": 126
       }
     },
 

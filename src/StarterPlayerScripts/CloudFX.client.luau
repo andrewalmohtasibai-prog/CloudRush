@@ -150,11 +150,12 @@ end
 -- ════════════════════════════════════════════════════════════
 local splats: { BasePart } = {}
 local splatAccum = 0
+local lastSplatTime = 0
 local hue = 0
 local lastTrailPos: Vector3? = nil
 
 local function dropSplat(x: number, z: number, runSpeed: number)
-	local frac = math.clamp(runSpeed / Config.MaxTopSpeed, 0, 1)
+	local frac = math.clamp(runSpeed / math.max(ClientState.topSpeed, 1), 0, 1)
 	local size = Config.SplatBaseSize + frac * Config.SplatSpeedSize
 	local s = Instance.new("Part")
 	s.Shape = Enum.PartType.Cylinder
@@ -240,6 +241,7 @@ RunService.RenderStepped:Connect(function(dt)
 	local char = player.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 	local runSpeed = ClientState.runSpeed
+	local now = os.clock()
 
 	-- Sky orb follows + bobs.
 	if hrp then
@@ -247,15 +249,16 @@ RunService.RenderStepped:Connect(function(dt)
 		orb.CFrame = CFrame.new(hrp.Position + Config.OrbOffset + Vector3.new(0, bob, 0))
 	end
 
-	-- Colour trail.
+	-- Colour trail: gated by BOTH distance and time so it can't spam parts at speed.
 	if hrp then
 		local pos = hrp.Position
 		if lastTrailPos then
 			local d = Vector2.new(pos.X - lastTrailPos.X, pos.Z - lastTrailPos.Z).Magnitude
 			hue += d * Config.HuePerStud
 			splatAccum += d
-			while splatAccum >= Config.SplatSpacing do
-				splatAccum -= Config.SplatSpacing
+			if splatAccum >= Config.SplatSpacing and (now - lastSplatTime) >= Config.SplatMinInterval then
+				splatAccum = 0
+				lastSplatTime = now
 				dropSplat(pos.X, pos.Z, runSpeed)
 			end
 		end
@@ -281,7 +284,7 @@ RunService.RenderStepped:Connect(function(dt)
 	end
 
 	-- FOV from speed + boost.
-	local sf = math.clamp(runSpeed / Config.MaxTopSpeed, 0, 1)
+	local sf = math.clamp(runSpeed / math.max(ClientState.topSpeed, 1), 0, 1)
 	local targetFov = Config.BaseFov + sf * Config.SpeedFovMax + (ClientState.boosting and Config.BoostFovKick or 0)
 	camera.FieldOfView += (targetFov - camera.FieldOfView) * math.min(1, dt * 6)
 

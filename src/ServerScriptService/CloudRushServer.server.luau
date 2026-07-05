@@ -6,9 +6,12 @@
 
 	Per player we own:
 	  • a Ground disc that FOLLOWS them  → they can never fall off
-	  • a field of cloud PUFFS that WRAP around them (treadmill) → endless motion
-	  • a field of RINGS that wrap + can be collected → +1 Speed
-	Plus: running distance → +1 Speed, speed milestones, DataStore persistence.
+	  • a field of cloud PUFFS that WRAP around them → endless motion
+	  • a field of RINGS that wrap + are collected by DISTANCE (never missed at speed)
+	Plus: running distance → +1 Speed, milestones, DataStore persistence, Sonic jump.
+
+	Perf: the ground follow + puff/ring wrap only run when the player crosses a grid
+	cell (GroundFollowSnap), not every frame. Ring pickup + speed reward run every frame.
 ]]
 
 local Players = game:GetService("Players")
@@ -18,6 +21,7 @@ local DataStoreService = game:GetService("DataStoreService")
 local CollectionService = game:GetService("CollectionService")
 
 local Config = require(ReplicatedStorage:WaitForChild("CloudConfig"))
+local Sonic = require(ReplicatedStorage:WaitForChild("SonicPhysics"))
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local WorldBuilder = require(script.Parent:WaitForChild("WorldBuilder"))
 
@@ -34,6 +38,8 @@ type PState = {
 	rings: { Part },
 	lastPos: Vector3?,
 	distAccum: number,
+	cellX: number,
+	cellZ: number,
 	milestonesHit: { [number]: boolean },
 }
 
@@ -44,35 +50,33 @@ local state: { [Player]: PState } = {}
 -- ════════════════════════════════════════════════════════════
 --  STATS
 -- ════════════════════════════════════════════════════════════
-local function syncStats(player: Player)
-	local d = data[player]
-	if not d then return end
+local function ensureStat(player: Player, name: string): IntValue
 	local ls = player:FindFirstChild("leaderstats")
 	if not ls then
 		ls = Instance.new("Folder")
 		ls.Name = "leaderstats"
 		ls.Parent = player
 	end
-	local speed = ls:FindFirstChild("Speed") :: IntValue?
-	if not speed then
-		speed = Instance.new("IntValue")
-		speed.Name = "Speed"
-		speed.Parent = ls
+	local v = ls:FindFirstChild(name) :: IntValue?
+	if not v then
+		v = Instance.new("IntValue")
+		v.Name = name
+		v.Parent = ls
 	end
-	local coins = ls:FindFirstChild("Rings") :: IntValue?
-	if not coins then
-		coins = Instance.new("IntValue")
-		coins.Name = "Rings"
-		coins.Parent = ls
-	end
-	speed.Value = d.Speed
-	coins.Value = d.Coins
+	return v
+end
+
+local function syncStats(player: Player)
+	local d = data[player]
+	if not d then return end
+	ensureStat(player, "Speed").Value = d.Speed
+	ensureStat(player, "Rings").Value = d.Coins
 	player:SetAttribute("Speed", d.Speed)
 	player:SetAttribute("Coins", d.Coins)
 end
 
 -- ════════════════════════════════════════════════════════════
---  MILESTONES
+--  MILESTONES + AWARD
 -- ════════════════════════════════════════════════════════════
 local function checkMilestones(player: Player)
 	local d = data[player]
@@ -92,40 +96,32 @@ local function awardSpeed(player: Player, amount: number)
 	d.Speed += amount
 	if d.Speed > d.BestSpeed then d.BestSpeed = d.Speed end
 	player:SetAttribute("Speed", d.Speed)
-	local ls = player:FindFirstChild("leaderstats")
-	local speed = ls and ls:FindFirstChild("Speed") :: IntValue?
-	if speed then speed.Value = d.Speed end
+	ensureStat(player, "Speed").Value = d.Speed
 	checkMilestones(player)
 end
 
 -- ════════════════════════════════════════════════════════════
---  RINGS
+--  RINGS (distance-based pickup → never tunnels at speed)
 -- ════════════════════════════════════════════════════════════
 local function collectRing(player: Player, ring: Part)
-	if not ring.CanTouch then return end
+	if not ring:GetAttribute("Available") then return end
 	local d = data[player]
 	if not d then return end
 
-	ring.CanTouch = false
+	ring:SetAttribute("Available", false)
 	ring.Transparency = 1
 
 	awardSpeed(player, Config.SpeedPerRing)
 	d.Coins += Config.CoinsPerRing
 	player:SetAttribute("Coins", d.Coins)
-	local ls = player:FindFirstChild("leaderstats")
-	local coins = ls and ls:FindFirstChild("Rings") :: IntValue?
-	if coins then coins.Value = d.Coins end
+	ensureStat(player, "Rings").Value = d.Coins
 
-	Net.RingCollected:FireClient(player, {
-		position = ring.Position,
-		speed = d.Speed,
-		rings = d.Coins,
-	})
+	Net.RingCollected:FireClient(player, { position = ring.Position, speed = d.Speed, rings = d.Coins })
 
-	task.delay(2.5, function()
+	task.delay(Config.RingRespawn, function()
 		if ring and ring.Parent then
 			ring.Transparency = 0
-			ring.CanTouch = true
+			ring:SetAttribute("Available", true)
 		end
 	end)
 end
@@ -144,28 +140,24 @@ local function buildPlayerWorld(player: Player): PState
 	local puffs: { Model } = {}
 	for _ = 1, Config.PuffClusters do
 		local cluster = WorldBuilder.makePuffCluster()
-		local x = math.random(-Config.FieldHalf, Config.FieldHalf)
-		local z = math.random(-Config.FieldHalf, Config.FieldHalf)
-		local y = math.random(Config.PuffMinY, Config.PuffMaxY)
-		cluster:PivotTo(CFrame.new(x, y, z))
+		cluster:PivotTo(CFrame.new(
+			math.random(-Config.FieldHalf, Config.FieldHalf),
+			math.random(Config.PuffMinY, Config.PuffMaxY),
+			math.random(-Config.FieldHalf, Config.FieldHalf)
+		))
 		cluster.Parent = folder
 		table.insert(puffs, cluster)
 	end
 
 	local rings: { Part } = {}
 	for _ = 1, Config.RingsPerPlayer do
-		local x = math.random(-Config.RingFieldHalf, Config.RingFieldHalf)
-		local z = math.random(-Config.RingFieldHalf, Config.RingFieldHalf)
-		local ring = WorldBuilder.makeRing(Vector3.new(x, Config.GroundY + Config.RingFloatHeight, z))
+		local ring = WorldBuilder.makeRing(Vector3.new(
+			math.random(-Config.RingFieldHalf, Config.RingFieldHalf),
+			Config.GroundY + Config.RingFloatHeight,
+			math.random(-Config.RingFieldHalf, Config.RingFieldHalf)
+		))
 		ring.Parent = folder
 		CollectionService:AddTag(ring, "CloudRing")
-		ring.Touched:Connect(function(hit)
-			local character = hit.Parent
-			local toucher = character and Players:GetPlayerFromCharacter(character)
-			if toucher == player then
-				collectRing(player, ring)
-			end
-		end)
 		table.insert(rings, ring)
 	end
 
@@ -176,62 +168,65 @@ local function buildPlayerWorld(player: Player): PState
 		rings = rings,
 		lastPos = nil,
 		distAccum = 0,
+		cellX = math.huge,
+		cellZ = math.huge,
 		milestonesHit = {},
 	}
 end
 
--- Treadmill wrap: keep an item within ±half of the player on X/Z. Items stay
--- world-static (you move past them) and only teleport when they fall outside the
--- window — which, for puffs, is beyond the fog so the pop is hidden.
-local function wrapItemXZ(px: number, pz: number, itemX: number, itemZ: number, half: number): (number, number, boolean)
-	local nx, nz = itemX, itemZ
-	local moved = false
-	if itemX - px > half then nx = itemX - half * 2; moved = true
-	elseif itemX - px < -half then nx = itemX + half * 2; moved = true end
-	if itemZ - pz > half then nz = itemZ - half * 2; moved = true
-	elseif itemZ - pz < -half then nz = itemZ + half * 2; moved = true end
+-- Treadmill wrap: teleport an item to the far side when it falls outside ±half of
+-- the player, so decor stays around you and pops happen beyond the fog.
+local function wrapXZ(px: number, pz: number, ix: number, iz: number, half: number): (number, number, boolean)
+	local nx, nz, moved = ix, iz, false
+	if ix - px > half then nx = ix - half * 2; moved = true
+	elseif ix - px < -half then nx = ix + half * 2; moved = true end
+	if iz - pz > half then nz = iz - half * 2; moved = true
+	elseif iz - pz < -half then nz = iz + half * 2; moved = true end
 	return nx, nz, moved
 end
 
 -- ════════════════════════════════════════════════════════════
 --  SPAWN
 -- ════════════════════════════════════════════════════════════
+local function addSpeedTrail(hrp: BasePart)
+	if hrp:FindFirstChild("TrailTop") then return end
+	local a0 = Instance.new("Attachment"); a0.Name = "TrailTop"; a0.Position = Vector3.new(0, 1.4, 0); a0.Parent = hrp
+	local a1 = Instance.new("Attachment"); a1.Name = "TrailBottom"; a1.Position = Vector3.new(0, -1.4, 0); a1.Parent = hrp
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Lifetime = 0.5
+	trail.MinLength = 0.1
+	trail.LightEmission = 0.5
+	trail.WidthScale = NumberSequence.new(1, 0)
+	trail.Transparency = NumberSequence.new(0.15, 1)
+	trail.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 200, 255)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 140, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 150, 220)),
+	})
+	trail.Parent = hrp
+end
+
 local function onCharacterAdded(player: Player, character: Model)
 	local hum = character:WaitForChild("Humanoid") :: Humanoid
 	local hrp = character:WaitForChild("HumanoidRootPart") :: BasePart
 
+	-- Authentic Sonic jump: JumpPower from the guide's jump velocity, gravity set in
+	-- the project file to the guide's gravity, giving a Sonic-shaped jump arc.
 	hum.UseJumpPower = true
-	hum.JumpPower = Config.JumpPower
+	hum.JumpPower = Sonic.JumpVelocity
 
-	-- Speed trail (server-made → all players see each other's streaks).
-	if not hrp:FindFirstChild("TrailTop") then
-		local a0 = Instance.new("Attachment"); a0.Name = "TrailTop"; a0.Position = Vector3.new(0, 1.4, 0); a0.Parent = hrp
-		local a1 = Instance.new("Attachment"); a1.Name = "TrailBottom"; a1.Position = Vector3.new(0, -1.4, 0); a1.Parent = hrp
-		local trail = Instance.new("Trail")
-		trail.Attachment0 = a0
-		trail.Attachment1 = a1
-		trail.Lifetime = 0.5
-		trail.MinLength = 0.1
-		trail.LightEmission = 0.5
-		trail.WidthScale = NumberSequence.new(1, 0)
-		trail.Transparency = NumberSequence.new(0.15, 1)
-		trail.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 200, 255)),
-			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 140, 255)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 150, 220)),
-		})
-		trail.Parent = hrp
-	end
+	addSpeedTrail(hrp)
 
 	local st = state[player]
-	-- Small offset so players don't stack on the exact same point.
 	local sx = math.random(-12, 12)
 	local sz = math.random(-12, 12)
 	task.wait(0.1)
 	if st then
 		WorldBuilder.moveGround(st.ground, sx, sz)
+		st.cellX, st.cellZ = math.huge, math.huge -- force a recentre next frame
 	end
-	-- Spawn on the ground, facing a set direction (fixes "spawn faces the wrong way").
 	local spawnPos = Vector3.new(sx, Config.GroundY + Config.SpawnHeight, sz)
 	hrp.CFrame = CFrame.lookAt(spawnPos, spawnPos + Config.SpawnFacing)
 	if st then
@@ -247,13 +242,11 @@ local function loadData(player: Player)
 	local ok, result = pcall(function()
 		return store:GetAsync("p_" .. player.UserId)
 	end)
-	local d: PData
 	if ok and typeof(result) == "table" then
-		d = { Speed = result.Speed or 0, Coins = result.Coins or 0, BestSpeed = result.BestSpeed or 0 }
+		data[player] = { Speed = result.Speed or 0, Coins = result.Coins or 0, BestSpeed = result.BestSpeed or 0 }
 	else
-		d = { Speed = 0, Coins = 0, BestSpeed = 0 }
+		data[player] = { Speed = 0, Coins = 0, BestSpeed = 0 }
 	end
-	data[player] = d
 end
 
 local function saveData(player: Player)
@@ -269,20 +262,13 @@ local function onPlayerAdded(player: Player)
 	state[player] = buildPlayerWorld(player)
 	syncStats(player)
 
-	-- Mark already-passed milestones so we don't re-announce old ones.
 	local d = data[player]
 	for i, m in Config.SpeedMilestones do
-		if d.Speed >= m.speed then
-			state[player].milestonesHit[i] = true
-		end
+		if d.Speed >= m.speed then state[player].milestonesHit[i] = true end
 	end
 
-	player.CharacterAdded:Connect(function(char)
-		onCharacterAdded(player, char)
-	end)
-	if player.Character then
-		onCharacterAdded(player, player.Character)
-	end
+	player.CharacterAdded:Connect(function(char) onCharacterAdded(player, char) end)
+	if player.Character then onCharacterAdded(player, player.Character) end
 end
 
 local function onPlayerRemoving(player: Player)
@@ -295,28 +281,25 @@ end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(onPlayerRemoving)
-for _, p in Players:GetPlayers() do
-	onPlayerAdded(p)
-end
+for _, p in Players:GetPlayers() do onPlayerAdded(p) end
 
 game:BindToClose(function()
-	for _, p in Players:GetPlayers() do
-		saveData(p)
-	end
+	for _, p in Players:GetPlayers() do saveData(p) end
 end)
 
 task.spawn(function()
 	while true do
 		task.wait(60)
-		for _, p in Players:GetPlayers() do
-			saveData(p)
-		end
+		for _, p in Players:GetPlayers() do saveData(p) end
 	end
 end)
 
 -- ════════════════════════════════════════════════════════════
---  MAIN LOOP: follow ground, wrap clouds/rings, reward running
+--  MAIN LOOP
 -- ════════════════════════════════════════════════════════════
+local snap = Config.GroundFollowSnap
+local pickupSq = Config.RingPickupRadius * Config.RingPickupRadius
+
 RunService.Heartbeat:Connect(function()
 	for player, st in state do
 		local character = player.Character
@@ -325,39 +308,48 @@ RunService.Heartbeat:Connect(function()
 		local pos = hrp.Position
 		local px, pz = pos.X, pos.Z
 
-		-- Ground follows (snapped so it never jitters). One part = cheap.
-		local snap = Config.GroundFollowSnap
-		WorldBuilder.moveGround(st.ground, math.round(px / snap) * snap, math.round(pz / snap) * snap)
-
-		-- Cloud puffs wrap around the player (beyond fog → invisible pops).
-		for _, puff in st.puffs do
-			local pv = puff:GetPivot()
-			local ip = pv.Position
-			local nx, nz, moved = wrapItemXZ(px, pz, ip.X, ip.Z, Config.FieldHalf)
-			if moved then
-				puff:PivotTo(CFrame.new(nx, ip.Y, nz))
-			end
-		end
-
-		-- Rings wrap too, staying near the player.
+		-- Ring pickup — every frame, by distance (never tunnels at high speed).
 		for _, ring in st.rings do
-			local rp = ring.Position
-			local nx, nz, moved = wrapItemXZ(px, pz, rp.X, rp.Z, Config.RingFieldHalf)
-			if moved then
-				ring.Position = Vector3.new(nx, Config.GroundY + Config.RingFloatHeight, nz)
+			if ring:GetAttribute("Available") then
+				local dx = ring.Position.X - px
+				local dz = ring.Position.Z - pz
+				local dy = ring.Position.Y - pos.Y
+				if dx * dx + dy * dy + dz * dz <= pickupSq then
+					collectRing(player, ring)
+				end
 			end
 		end
 
-		-- Running grants Speed (keyboard-loop DNA).
+		-- Running grants Speed.
 		local lp = st.lastPos
 		if lp then
-			local delta = pos - lp
-			st.distAccum += Vector2.new(delta.X, delta.Z).Magnitude
+			local dx = pos.X - lp.X
+			local dz = pos.Z - lp.Z
+			st.distAccum += math.sqrt(dx * dx + dz * dz)
 			while st.distAccum >= Config.StudsPerSpeed do
 				st.distAccum -= Config.StudsPerSpeed
 				awardSpeed(player, 1)
 			end
 		end
 		st.lastPos = pos
+
+		-- Recentre ground + wrap decor ONLY when we cross a grid cell (perf).
+		local cx = math.round(px / snap)
+		local cz = math.round(pz / snap)
+		if cx ~= st.cellX or cz ~= st.cellZ then
+			st.cellX, st.cellZ = cx, cz
+			WorldBuilder.moveGround(st.ground, cx * snap, cz * snap)
+
+			for _, puff in st.puffs do
+				local ip = puff:GetPivot().Position
+				local nx, nz, moved = wrapXZ(px, pz, ip.X, ip.Z, Config.FieldHalf)
+				if moved then puff:PivotTo(CFrame.new(nx, ip.Y, nz)) end
+			end
+			for _, ring in st.rings do
+				local rp = ring.Position
+				local nx, nz, moved = wrapXZ(px, pz, rp.X, rp.Z, Config.RingFieldHalf)
+				if moved then ring.Position = Vector3.new(nx, Config.GroundY + Config.RingFloatHeight, nz) end
+			end
+		end
 	end
 end)

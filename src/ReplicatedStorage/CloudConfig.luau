@@ -4,43 +4,43 @@
 	═══════════
 	Every tunable number for CLOUD RUSH.
 
-	ARCHITECTURE (v2 — endless, no falling):
-	  • A LARGE ground disc FOLLOWS each player → you can never run off the edge.
-	  • A field of cloud puffs WRAPS around the player beyond the fog → endless feel.
-	  • The floor "reacts" via a world-space COLOUR-SPLAT TRAIL at your feet.
-	  • Keyboard-game loop: rings + running → +1 Speed → higher top speed.
+	WORLD (v2 — endless, no falling):
+	  • A large ground disc FOLLOWS each player → you can never run off the edge.
+	  • Cloud puffs WRAP around the player beyond the fog → endless feel.
+	  • The floor "reacts" via a world-space COLOUR-SPLAT trail at your feet.
 
-	MOVEMENT (v3 — authentic Sonic physics):
-	  • Raw Genesis constants live in SonicPhysics.luau (acceleration, friction,
-	    top speed, spindash, etc., converted from Sonic-pixels to studs).
-	  • The numbers below scale that base by your permanent Speed stat and tune the
-	    spindash charge.
+	MOVEMENT (v4 — Humanoid-native Sonic feel):
+	  • Sonic constants live in SonicPhysics.luau (accel/friction/skid/top/spindash).
+	  • We drive Humanoid.WalkSpeed with that curve — no fighting the engine.
+	  • The Speed STAT grows forever (progression/flex), but actual WALKSPEED is
+	    capped to a Humanoid-stable range (MaxWalkSpeed) so movement stays smooth.
+	    Beyond the cap, "faster" is sold through FOV / speed-lines / trail, not raw
+	    WalkSpeed (which gets unstable in the hundreds).
 ]]
 
 local Config = {}
 
 -- ════════════════════════════════════════════════════════════
---  SONIC PROGRESSION  (Speed stat → faster top speed)
+--  SPEED / PROGRESSION
 -- ════════════════════════════════════════════════════════════
--- Effective top speed = SonicPhysics.TopSpeed × (1 + Speed × SpeedMultPerStat),
--- capped at × SpeedMultMax. Keeps the Sonic feel while the grind makes you faster.
+-- Effective top speed = min(SonicPhysics.TopSpeed × mult, MaxWalkSpeed).
 Config.SpeedMultPerStat  = 0.0025
-Config.SpeedMultMax      = 7
+Config.SpeedMultMax      = 4
+Config.MaxWalkSpeed      = 120    -- Humanoid stays smooth up to ~this; keep movement here
+Config.AccelerationScale = 2.0    -- Roblox-runner tuning of Sonic's base acceleration
 
--- Spindash (hold to charge, release to launch — the satisfying "charge & go")
-Config.SpindashChargeTime = 0.9   -- seconds of holding to reach full charge
-Config.SpindashMaxCharge  = 8     -- Sonic's max charge level (launch = 8 + charge/2 px/f)
-Config.SpindashHoldSlow   = 0.15  -- while charging you're slowed to this fraction of speed
+-- ════════════════════════════════════════════════════════════
+--  SPINDASH (hold to charge — rev pitch ladders up — release to launch)
+-- ════════════════════════════════════════════════════════════
+Config.SpindashChargeTime = 0.9   -- seconds to full charge
+Config.SpindashMaxCharge  = 8     -- Sonic's max (launch = 8 + charge/2 px/f)
+Config.SpindashLaunchTime = 0.45  -- how long the forward launch is driven
 
--- Jump (Humanoid handles Y; the controller drives XZ)
-Config.JumpPower         = 55
-
--- Reference speed cap used only for FX scaling (FOV / splat size).
-Config.MaxTopSpeed       = 380
-
--- Camera feel
+-- ════════════════════════════════════════════════════════════
+--  CAMERA FEEL
+-- ════════════════════════════════════════════════════════════
 Config.BaseFov           = 68
-Config.SpeedFovMax       = 22     -- extra FOV as you approach the speed cap
+Config.SpeedFovMax       = 22     -- extra FOV as you approach top speed
 Config.BoostFovKick      = 16     -- extra FOV on a spindash launch
 
 -- ════════════════════════════════════════════════════════════
@@ -52,6 +52,8 @@ Config.StudsPerSpeed     = 45     -- running this far also grants +1 Speed
 Config.RingsPerPlayer    = 22
 Config.RingFieldHalf     = 150
 Config.RingFloatHeight   = 3.5
+Config.RingPickupRadius  = 6      -- distance-based pickup (never misses at speed)
+Config.RingRespawn       = 2.5
 
 -- ════════════════════════════════════════════════════════════
 --  GROUND (the following disc — "you can never fall")
@@ -60,7 +62,7 @@ Config.GroundY           = 0
 Config.GroundRadius      = 600
 Config.GroundThickness   = 4
 Config.GroundColor       = Color3.fromRGB(240, 245, 252)
-Config.GroundFollowSnap  = 8
+Config.GroundFollowSnap  = 8      -- ground/decor recentre step (studs)
 
 -- ════════════════════════════════════════════════════════════
 --  CLOUD SEA (wrapping decorative puffs)
@@ -77,14 +79,15 @@ Config.PuffColorHigh     = Color3.fromRGB(255, 255, 255)
 -- ════════════════════════════════════════════════════════════
 --  REACTIVE COLOUR TRAIL
 -- ════════════════════════════════════════════════════════════
-Config.SplatSpacing      = 6
+Config.SplatSpacing      = 6      -- min studs travelled between splats
+Config.SplatMinInterval  = 0.05   -- min seconds between splats (caps ~20/sec)
 Config.SplatLife         = 1.4
 Config.SplatBaseSize     = 10
 Config.SplatSpeedSize    = 10
 Config.HuePerStud        = 0.0016
 Config.SplatSaturation   = 0.55
 Config.SplatValue        = 1.0
-Config.MaxSplats         = 60
+Config.MaxSplats         = 45
 
 -- ════════════════════════════════════════════════════════════
 --  SKY ORB (client-side; follows the player)
@@ -115,27 +118,18 @@ Config.SpawnFacing       = Vector3.new(0, 0, 1)
 --  SOUNDS (paste your own asset ids; 0 = silent, still works)
 -- ════════════════════════════════════════════════════════════
 Config.Sounds = {
-	Ring      = "rbxassetid://0",  -- ring "ching"
-	Charge    = "rbxassetid://0",  -- spindash rev (pitch ladders up while charging → ASMR)
-	Launch    = "rbxassetid://0",  -- spindash release "whoosh"
-	Milestone = "rbxassetid://0",  -- milestone fanfare
-	Music     = "rbxassetid://0",  -- ambient loop
+	Ring      = "rbxassetid://0",
+	Charge    = "rbxassetid://0",  -- spindash rev (pitch ladders up → ASMR)
+	Launch    = "rbxassetid://0",  -- spindash release whoosh
+	Milestone = "rbxassetid://0",
+	Music     = "rbxassetid://0",
 }
 
 -- ════════════════════════════════════════════════════════════
 --  HELPERS
 -- ════════════════════════════════════════════════════════════
--- Multiplier applied to the base Sonic top speed from your Speed stat.
 function Config.getSpeedMultiplier(speed: number): number
 	return math.min(1 + speed * Config.SpeedMultPerStat, Config.SpeedMultMax)
-end
-
--- Keep a decorative item within ±half of the player (used for initial placement).
-function Config.wrapAround(value: number, center: number, half: number): number
-	local size = half * 2
-	local d = value - center
-	d = ((d + half) % size + size) % size - half
-	return center + d
 end
 
 return Config

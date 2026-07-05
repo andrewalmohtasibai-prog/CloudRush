@@ -109,6 +109,7 @@ function WorldBuilder.makeRing(position: Vector3): Part
 	ring.Color = Color3.fromRGB(255, 210, 64)
 	ring.Size = Vector3.new(0.5, 6, 6)     -- thin disc, ~6 studs across
 	ring.CFrame = CFrame.new(position)      -- axis along X → stands upright, spun by client
+	ring:SetAttribute("Available", true)    -- distance-based pickup checks this
 	return ring
 end
 

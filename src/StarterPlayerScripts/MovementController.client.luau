@@ -1,26 +1,26 @@
 --!strict
 --[[
-	MovementController  (v4 — robust, Humanoid-native Sonic feel)
-	═════════════════════════════════════════════════════════════
-	Lesson learned: do NOT fight the Humanoid (no WalkSpeed=0 + LinearVelocity).
-	Instead we KEEP the Humanoid in charge of movement / turning / animation /
-	collision / jumping, and drive its WalkSpeed with the Sonic acceleration curve.
+	MovementController  (v5 — Humanoid-native Sonic feel, audited)
+	═══════════════════════════════════════════════════════════════
+	The Humanoid stays in charge of movement / turning / animation / collision /
+	jumping. We drive Humanoid.WalkSpeed with the Sonic acceleration curve.
 
-	Sonic feel we keep (constants from SonicPhysics.luau):
-	  • Acceleration ramp — you speed up over time while holding a direction.
-	  • Skid — pressing against your motion brakes hard.
-	  • Friction / roll friction.
-	  • Spindash — hold to charge (rev pitch ladders up), release to LAUNCH forward.
-	  • Speed stat multiplies top speed.
+	Sonic feel: acceleration ramp, SKID against your motion, friction, roll, and a
+	SPINDASH (hold to charge — rev pitch ladders up — release to launch). Jump height
+	is VARIABLE (tap = short hop, hold = full) per the guide.
 
-	Trade-off (documented, revisit later): with the Humanoid model you stop when you
-	release input (no free coasting). For a hold-forward runner this is fine; true
-	glide/inertia would need a full custom physics character (a later milestone).
+	Speed model (audit decision): the Speed STAT grows forever, but WalkSpeed is
+	CAPPED at Config.MaxWalkSpeed so the Humanoid stays smooth (it gets unstable in
+	the hundreds). Extra "speed" is sold via FOV / speed-lines / trail in CloudFX.
+
+	The spindash launch briefly drives velocity directly for a reliable dash, then
+	hands back to normal WalkSpeed movement.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
+local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -66,9 +66,9 @@ local function onSpindash(_, s: Enum.UserInputState)
 				local flat = Vector3.new(look.X, 0, look.Z)
 				launchDir = (flat.Magnitude > 0.01) and flat.Unit or Vector3.new(0, 0, 1)
 				launching = true
-				launchUntil = os.clock() + 0.5
+				launchUntil = os.clock() + Config.SpindashLaunchTime
 				ClientState.boosting = true
-				task.delay(0.45, function() ClientState.boosting = false end)
+				task.delay(Config.SpindashLaunchTime, function() ClientState.boosting = false end)
 				Net.Boosted:FireServer()
 			end
 			chargeLevel = 0
@@ -97,6 +97,21 @@ ContextActionService:SetPosition("Spindash", UDim2.new(1, -120, 0.55, 0))
 ContextActionService:BindAction("Roll", onRoll, true, Enum.KeyCode.LeftControl, Enum.KeyCode.ButtonB)
 ContextActionService:SetTitle("Roll", "ROLL")
 ContextActionService:SetPosition("Roll", UDim2.new(1, -120, 0.72, 0))
+
+-- ── Variable jump height (tap = short hop) ──────────────────
+UserInputService.InputEnded:Connect(function(input, gpe)
+	if gpe then return end
+	if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.ButtonA then
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if hrp then
+			local v = hrp.AssemblyLinearVelocity
+			if v.Y > Sonic.JumpReleaseVelocity then
+				hrp.AssemblyLinearVelocity = Vector3.new(v.X, Sonic.JumpReleaseVelocity, v.Z)
+			end
+		end
+	end
+end)
 
 -- ── Camera behind on spawn ──────────────────────────────────
 player.CharacterAdded:Connect(function(char)
@@ -134,16 +149,17 @@ RunService.RenderStepped:Connect(function(dt)
 
 	local speedStat = player:GetAttribute("Speed") or 0
 	local mult = Config.getSpeedMultiplier(speedStat)
-	local effTop = Sonic.TopSpeed * mult
+	local effTop = math.min(Sonic.TopSpeed * mult, Config.MaxWalkSpeed)
 	local grounded = hum.FloorMaterial ~= Enum.Material.Air
 	local now = os.clock()
 
-	-- Spindash LAUNCH window: drive forward regardless of input.
+	-- Spindash LAUNCH: briefly drive velocity for a reliable dash, then hand back.
 	if launching then
 		if now < launchUntil then
-			hum:Move(launchDir, false)
-			currentSpeed = moveToward(currentSpeed, effTop, Sonic.Friction * dt * 0.5)
-			hum.WalkSpeed = currentSpeed
+			hrp.AssemblyLinearVelocity = launchDir * currentSpeed
+				+ Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
+			currentSpeed = moveToward(currentSpeed, effTop, Sonic.Friction * Config.AccelerationScale * dt)
+			hum.WalkSpeed = math.min(currentSpeed, effTop)
 			ClientState.runSpeed = currentSpeed
 			ClientState.topSpeed = effTop
 			return
@@ -156,13 +172,12 @@ RunService.RenderStepped:Connect(function(dt)
 	local hasInput = inputMag > 0.05
 
 	if charging then
-		-- Crouch & rev.
 		chargeLevel = math.min(Config.SpindashMaxCharge, chargeLevel + (Config.SpindashMaxCharge / Config.SpindashChargeTime) * dt)
 		currentSpeed = moveToward(currentSpeed, 0, Sonic.Deceleration * dt)
 		ClientState.charging = true
 		ClientState.chargeLevel = chargeLevel
 	else
-		-- Skid = pressing against your current motion at speed.
+		-- Skid = pressing against your motion at speed.
 		local skidding = false
 		if hasInput and currentSpeed > Sonic.TopSpeed * 0.4 then
 			local vel = hrp.AssemblyLinearVelocity
@@ -179,15 +194,14 @@ RunService.RenderStepped:Connect(function(dt)
 		elseif skidding then
 			currentSpeed = moveToward(currentSpeed, 0, Sonic.Deceleration * dt)
 		elseif hasInput then
-			local accel = grounded and Sonic.Acceleration or Sonic.AirAcceleration
-			-- accelerate up to top; preserve any overspeed (spindash).
-			currentSpeed = moveToward(currentSpeed, math.max(effTop, currentSpeed), accel * dt)
+			local accel = (grounded and Sonic.Acceleration or Sonic.AirAcceleration) * Config.AccelerationScale
+			currentSpeed = moveToward(currentSpeed, effTop, accel * dt)
 		elseif grounded then
-			currentSpeed = moveToward(currentSpeed, 0, Sonic.Friction * dt)
+			currentSpeed = moveToward(currentSpeed, 0, Sonic.Friction * Config.AccelerationScale * dt)
 		end
 	end
 
-	currentSpeed = math.clamp(currentSpeed, 0, Sonic.GlobalSpeedCap * mult)
+	currentSpeed = math.clamp(currentSpeed, 0, effTop)
 	hum.WalkSpeed = currentSpeed
 	ClientState.runSpeed = currentSpeed
 	ClientState.topSpeed = effTop
