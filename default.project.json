@@ -1,0 +1,108 @@
+{
+  "name": "CloudRush",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$path": "src/ReplicatedStorage"
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$path": "src/ServerScriptService"
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$path": "src/StarterPlayerScripts"
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "Gravity": 140,
+        "FilteringEnabled": true
+      }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Technology": "Future",
+        "Brightness": 3,
+        "ClockTime": 14.5,
+        "GeographicLatitude": 20,
+        "ExposureCompensation": 0.25,
+        "Ambient": [0.10, 0.10, 0.16],
+        "OutdoorAmbient": [0.55, 0.60, 0.76],
+        "EnvironmentDiffuseScale": 1,
+        "EnvironmentSpecularScale": 1,
+        "GlobalShadows": true,
+        "FogEnd": 100000
+      },
+
+      "Atmosphere": {
+        "$className": "Atmosphere",
+        "$properties": {
+          "Density": 0.38,
+          "Offset": 0.25,
+          "Color": [0.78, 0.86, 1.0],
+          "Decay": [0.42, 0.57, 0.78],
+          "Glare": 0.35,
+          "Haze": 2.2
+        }
+      },
+
+      "Bloom": {
+        "$className": "BloomEffect",
+        "$properties": {
+          "Intensity": 0.65,
+          "Size": 24,
+          "Threshold": 1.05
+        }
+      },
+
+      "DoF": {
+        "$className": "DepthOfFieldEffect",
+        "$properties": {
+          "FarIntensity": 0.15,
+          "FocusDistance": 55,
+          "InFocusRadius": 130,
+          "NearIntensity": 0.05
+        }
+      },
+
+      "Grade": {
+        "$className": "ColorCorrectionEffect",
+        "$properties": {
+          "Brightness": 0.02,
+          "Contrast": 0.12,
+          "Saturation": 0.16,
+          "TintColor": [1, 1, 1]
+        }
+      },
+
+      "SunRays": {
+        "$className": "SunRaysEffect",
+        "$properties": {
+          "Intensity": 0.14,
+          "Spread": 0.9
+        }
+      },
+
+      "Sky": {
+        "$className": "Sky",
+        "$properties": {
+          "SunAngularSize": 14,
+          "MoonAngularSize": 0,
+          "StarCount": 0,
+          "CelestialBodiesShown": true
+        }
+      }
+    }
+  }
+}
