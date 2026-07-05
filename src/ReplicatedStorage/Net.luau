@@ -4,16 +4,16 @@
 	═══
 	RemoteEvents for CLOUD RUSH. Server creates, client waits.
 
-	  • RingCollected : server → client  { position, speed, rings }   (VFX + HUD)
-	  • GateOpened    : server → client  { label, position }          (VFX)
-	  • Boosted       : client → server  (optional analytics/validation hook)
+	  • RingCollected : server → client  { position, speed, rings }  (VFX + HUD)
+	  • Milestone     : server → client  { label, speed }            (celebration)
+	  • Boosted       : client → server                              (analytics hook)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local FOLDER_NAME = "CloudRushRemotes"
-local EVENT_NAMES = { "RingCollected", "GateOpened", "Boosted" }
+local EVENT_NAMES = { "RingCollected", "Milestone", "Boosted" }
 
 local folder: Folder
 if RunService:IsServer() then

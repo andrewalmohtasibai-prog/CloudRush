@@ -1,71 +1,76 @@
 # ☁️⚡ CLOUD RUSH
 
-Sprint **Sonic-style** across an endless, dreamy **sea of clouds** that **bloom into
-color as you move**. Collect rings and just *keep running* to permanently raise your
-**Speed** — the more you play, the faster you get forever (the keyboard-game loop),
-Sonic-flavored, in a color-reactive sky world.
+Sprint **Sonic-style** across an **endless** dreamy sea of clouds that **bloom into
+colour as you move**. Collect rings and just *keep running* to permanently raise your
+**Speed** — the more you play, the faster you get forever (the keyboard-game loop).
+
+> 📄 See **DEVELOPMENT_PLAN.md** (how/when we build) and **PRODUCTION_BIBLE.md**
+> (economy, monetization, 2026 Roblox policy, launch). This is an early build — see
+> "Status" below.
 
 ---
 
-## The fusion (what this actually is)
-
+## The fusion (what this is)
 | Pillar | Source | In CLOUD RUSH |
 |---|---|---|
-| Momentum + boost + high top speed | Sonic | Accelerate/friction model + boost burst |
+| Momentum + boost + high top speed | Sonic | Accel/friction model + boost burst |
 | **+1 Speed forever** | "+1 Speed Keyboard Escape" | Rings **and** running distance give +1 Speed |
-| Speed **gates** ("reach X to pass") | keyboard game | Neon arches that open at Speed thresholds |
-| Dreamy, reactive world | your cloud reference | Color-reactive cloud floor + Future lighting |
-| See other players | Roblox social | Shared world + everyone's colored speed **Trail** |
-
----
+| Speed **milestones** | keyboard game | HUD celebrations at Speed thresholds |
+| Dreamy, reactive world | your cloud reference | Colour-splat trail + Future lighting |
+| See other players | Roblox social | Shared sky + everyone's colour speed **Trail** |
 
 ## Controls
 - **Move:** WASD / thumbstick (hold to build momentum)
-- **Jump:** Space / A button
-- **Boost:** Left Shift / R2 / the on-screen **BOOST** button
+- **Jump:** Space / A
+- **Boost:** Left Shift / R2 / on-screen **BOOST** button
 
 ---
+
+## How the endless world works (v2 architecture)
+- **You can never fall:** a large **ground disc follows you** every frame (1 cheap part).
+- **Endless motion:** a field of **cloud puffs wraps** around you beyond the fog line, so
+  you feel like you're moving through infinite sky with no visible edge.
+- **Reactive floor:** soft glowing **colour splats** drop at your feet (hue cycling as you
+  move) and fade behind you.
+- **Sky orb** follows you so it's always framed.
 
 ## Project layout
 ```
 CloudRush/
-├── default.project.json                 ← Rojo + all Lighting/Atmosphere/post-FX
+├── default.project.json                 ← Rojo + Lighting/Atmosphere/post-FX (depth-tuned)
 └── src/
     ├── ReplicatedStorage/
-    │   ├── CloudConfig.luau              ← ALL tunable numbers + cell math
-    │   ├── Net.luau                      ← RemoteEvents
+    │   ├── CloudConfig.luau              ← ALL tunable numbers + helpers
+    │   ├── Net.luau                      ← RemoteEvents (RingCollected/Milestone/Boosted)
     │   └── ClientState.luau              ← shared table between the 2 client scripts
     ├── ServerScriptService/
-    │   ├── WorldBuilder.luau             ← builds floor / clouds / orb / rings / gates
-    │   └── CloudRushServer.server.luau   ← players, rings, speed, gates, DataStore
+    │   ├── WorldBuilder.luau             ← ground / puff / ring factories + volumetric clouds
+    │   └── CloudRushServer.server.luau   ← following world, rings, speed, milestones, DataStore
     └── StarterPlayerScripts/
-        ├── MovementController.client.luau← Sonic momentum + boost
-        └── CloudFX.client.luau           ← reactive floor + HUD + FOV + VFX
+        ├── MovementController.client.luau← Sonic momentum + boost + spawn camera framing
+        └── CloudFX.client.luau           ← colour trail + sky orb + HUD + FOV + VFX
 ```
 
 ## Run it
-
 ### Rojo (recommended)
-1. Install [Rojo](https://rojo.space/) + the Studio plugin.
-2. `rojo serve` in this folder, connect from Studio. Press **Play**.
+`rojo serve` in this folder → connect from the Studio Rojo plugin → **Play**.
 
 ### Studio (manual)
-1. New Baseplate. In **Lighting**, set `Technology = Future`, add an **Atmosphere**,
-   **BloomEffect**, **DepthOfFieldEffect**, **ColorCorrectionEffect**, **SunRaysEffect**,
-   **Sky** (values are listed in `default.project.json`).
-2. **ReplicatedStorage:** `ModuleScript`s `CloudConfig`, `Net`, `ClientState`.
-3. **ServerScriptService:** `ModuleScript` `WorldBuilder` + `Script` `CloudRushServer`.
-4. **StarterPlayerScripts:** `LocalScript`s `MovementController`, `CloudFX`.
-5. Enable **Studio Access to API Services** (Game Settings → Security) so the
-   DataStore save/load works. Press **Play**.
-
-> Names must match exactly — scripts require each other by name.
+Recreate the tree above (matching names), set **Lighting.Technology = Future** and add the
+effects listed in `default.project.json`, enable **Studio Access to API Services**
+(Game Settings → Security) for DataStore, then **Play**.
 
 ## Add sounds
-Paste asset ids into `CloudConfig.Sounds` (`Ring`, `Boost`, `Gate`). `0` = silent.
+Paste asset ids into `CloudConfig.Sounds` (`Ring`, `Boost`, `Milestone`, `Music`). `0` = silent.
 
-## Quick tuning
-- **Faster/floatier Sonic feel:** raise `Acceleration`, `MaxTopSpeed`, lower `Friction`.
+## Quick tuning (all in CloudConfig)
+- **Feel:** `Acceleration`, `Friction`, `MaxTopSpeed`, `BoostSpeed`.
 - **Grind pace:** `SpeedPerRing`, `StudsPerSpeed`.
-- **More color trail:** raise `BloomRadiusCells` / `ColorFadeTime` (watch mobile perf).
-- **Color speed:** `HuePerStud`.
+- **Colour trail:** `SplatSpacing`, `SplatLife`, `HuePerStud`.
+- **World size / no-fall margin:** `GroundRadius`, `FieldHalf` (keep `FieldHalf` beyond the fog).
+
+## Status
+Early build (~5%). Working: endless no-fall world, depth lighting, momentum + boost,
+colour trail, rings + running → Speed, persistence, HUD. Missing: real audio, tuned feel,
+retention systems, content, monetization, compliance, analytics, launch — all mapped in
+**DEVELOPMENT_PLAN.md**.

@@ -2,19 +2,22 @@
 --[[
 	CloudFX
 	═══════
-	All the feel:
-	  • REACTIVE CLOUD FLOOR — tiles near you bloom into color (hue cycles as you
-	    move) and fade back to white behind you. Bounded to a small neighborhood
-	    around the player so it's cheap on mobile.
-	  • Speed lines + FOV kick that scale with your momentum / boost.
-	  • HUD: Speed stat, Rings, live velocity.
-	  • Ring spin + collect burst; gate-open flash.
+	All the feel, rebuilt for the endless following world:
+	  • REACTIVE COLOUR TRAIL — soft glowing splats dropped on the clouds as you run,
+	    hue cycling with movement, fading behind you. Works with a moving floor and
+	    reads as "the clouds change colour as you move."
+	  • A SKY ORB that follows you (never left behind or cut off).
+	  • Speed lines + FOV kick scaled to momentum/boost.
+	  • HUD: Speed / Rings / live velocity, plus milestone celebrations.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
+local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("CloudConfig"))
@@ -35,7 +38,7 @@ local function makeSound(id: string): Sound
 end
 local ringSound = makeSound(Config.Sounds.Ring)
 local boostSound = makeSound(Config.Sounds.Boost)
-local gateSound = makeSound(Config.Sounds.Gate)
+local milestoneSound = makeSound(Config.Sounds.Milestone)
 
 local function play(sound: Sound, volume: number, pitch: number?)
 	if sound.SoundId == "" or sound.SoundId == "rbxassetid://0" then return end
@@ -61,7 +64,7 @@ local function label(pos: UDim2, size: UDim2, textSize: number, color: Color3): 
 	l.AnchorPoint = Vector2.new(0.5, 0)
 	l.Font = Enum.Font.GothamBlack
 	l.TextColor3 = color
-	l.TextStrokeTransparency = 0.4
+	l.TextStrokeTransparency = 0.35
 	l.TextSize = textSize
 	l.Text = ""
 	l.Parent = gui
@@ -69,17 +72,15 @@ local function label(pos: UDim2, size: UDim2, textSize: number, color: Color3): 
 end
 
 local speedLabel = label(UDim2.fromScale(0.5, 0.05), UDim2.fromScale(0.7, 0.08), 34, Color3.fromRGB(255, 255, 255))
-local ringsLabel = label(UDim2.fromScale(0.5, 0.13), UDim2.fromScale(0.7, 0.05), 22, Color3.fromRGB(255, 216, 74))
+local ringsLabel = label(UDim2.fromScale(0.5, 0.13), UDim2.fromScale(0.7, 0.05), 22, Color3.fromRGB(255, 210, 64))
 local velLabel   = label(UDim2.fromScale(0.5, 0.9),  UDim2.fromScale(0.7, 0.06), 20, Color3.fromRGB(190, 220, 255))
-local announce   = label(UDim2.fromScale(0.5, 0.4),  UDim2.fromScale(0.9, 0.15), 60, Color3.fromRGB(255, 255, 255))
+local announce   = label(UDim2.fromScale(0.5, 0.38), UDim2.fromScale(0.9, 0.15), 58, Color3.fromRGB(255, 255, 255))
 announce.AnchorPoint = Vector2.new(0.5, 0.5)
 announce.TextTransparency = 1
 
 local function refreshHUD()
-	local sp = player:GetAttribute("Speed") or 0
-	local coins = player:GetAttribute("Coins") or 0
-	speedLabel.Text = "SPEED  " .. sp
-	ringsLabel.Text = "◍ " .. coins .. " rings"
+	speedLabel.Text = "SPEED  " .. (player:GetAttribute("Speed") or 0)
+	ringsLabel.Text = "◍ " .. (player:GetAttribute("Coins") or 0) .. " rings"
 end
 player:GetAttributeChangedSignal("Speed"):Connect(refreshHUD)
 player:GetAttributeChangedSignal("Coins"):Connect(refreshHUD)
@@ -89,13 +90,13 @@ local function bigAnnounce(text: string, color: Color3)
 	announce.Text = text
 	announce.TextColor3 = color
 	announce.TextTransparency = 0
-	announce.TextSize = 60
+	announce.TextSize = 58
 	local start = os.clock()
 	task.spawn(function()
-		while os.clock() - start < 1.1 do
-			local a = (os.clock() - start) / 1.1
+		while os.clock() - start < 1.3 do
+			local a = (os.clock() - start) / 1.3
 			announce.TextTransparency = a
-			announce.TextSize = 60 + a * 40
+			announce.TextSize = 58 + a * 46
 			RunService.RenderStepped:Wait()
 		end
 		announce.TextTransparency = 1
@@ -103,17 +104,32 @@ local function bigAnnounce(text: string, color: Color3)
 end
 
 -- ════════════════════════════════════════════════════════════
---  PARTICLE BURST
+--  SKY ORB (client-side; follows the player)
+-- ════════════════════════════════════════════════════════════
+local orb = Instance.new("Part")
+orb.Name = "SkyOrb"
+orb.Shape = Enum.PartType.Ball
+orb.Anchored = true
+orb.CanCollide = false
+orb.CanQuery = false
+orb.CastShadow = false
+orb.Material = Enum.Material.SmoothPlastic
+orb.Color = Config.OrbColor
+orb.Size = Vector3.new(Config.OrbSize, Config.OrbSize, Config.OrbSize)
+orb.Parent = Workspace
+
+-- ════════════════════════════════════════════════════════════
+--  PARTICLE BURST (ring collect)
 -- ════════════════════════════════════════════════════════════
 local function burst(position: Vector3, color: Color3, amount: number)
 	local p = Instance.new("Part")
 	p.Anchored = true
 	p.CanCollide = false
+	p.CanQuery = false
 	p.Transparency = 1
 	p.Size = Vector3.one
 	p.Position = position
 	p.Parent = Workspace
-
 	local pe = Instance.new("ParticleEmitter")
 	pe.Color = ColorSequence.new(color)
 	pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
@@ -124,136 +140,92 @@ local function burst(position: Vector3, color: Color3, amount: number)
 	pe.LightEmission = 0.7
 	pe.Parent = p
 	pe:Emit(amount)
-
-	task.delay(0.9, function()
-		p:Destroy()
-	end)
+	Debris:AddItem(p, 1)
 end
 
 -- ════════════════════════════════════════════════════════════
---  REACTIVE CLOUD FLOOR
+--  REACTIVE COLOUR TRAIL
 -- ════════════════════════════════════════════════════════════
-local tileDict: { [string]: BasePart } = {}
-
-local function registerTile(tile: Instance)
-	if not tile:IsA("BasePart") then return end
-	local i = tile:GetAttribute("GX")
-	local j = tile:GetAttribute("GZ")
-	if typeof(i) == "number" and typeof(j) == "number" then
-		tileDict[i .. "_" .. j] = tile
-	end
-end
-
-task.spawn(function()
-	local world = Workspace:WaitForChild("CloudWorld")
-	local floor = world:WaitForChild("Floor")
-	for _, t in floor:GetChildren() do
-		registerTile(t)
-	end
-	floor.ChildAdded:Connect(function(t)
-		task.wait()
-		registerTile(t)
-	end)
-end)
-
--- Active colored tiles → { color, expire }
-type ActiveTile = { color: Color3, expire: number }
-local active: { [BasePart]: ActiveTile } = {}
+local splats: { BasePart } = {}
+local splatAccum = 0
 local hue = 0
-local base = Config.BaseTileColor
+local lastTrailPos: Vector3? = nil
 
-local function updateReactiveFloor(dt: number, runSpeed: number)
-	local char = player.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local now = os.clock()
+local function dropSplat(x: number, z: number, runSpeed: number)
+	local frac = math.clamp(runSpeed / Config.MaxTopSpeed, 0, 1)
+	local size = Config.SplatBaseSize + frac * Config.SplatSpeedSize
+	local s = Instance.new("Part")
+	s.Shape = Enum.PartType.Cylinder
+	s.Anchored = true
+	s.CanCollide = false
+	s.CanQuery = false
+	s.CastShadow = false
+	s.Material = Enum.Material.Neon
+	s.Color = Color3.fromHSV(hue % 1, Config.SplatSaturation, Config.SplatValue)
+	s.Size = Vector3.new(0.4, size, size)
+	s.CFrame = CFrame.new(x, Config.GroundY + 0.08, z) * CFrame.Angles(0, 0, math.rad(90))
+	s.Transparency = 0.25
+	s.Parent = Workspace
 
-	if hrp then
-		-- Hue drifts with how fast you're moving.
-		hue = (hue + runSpeed * dt * Config.HuePerStud) % 1
-		local target = Color3.fromHSV(hue, Config.TileSaturation, Config.TileValue)
+	TweenService:Create(s, TweenInfo.new(Config.SplatLife, Enum.EasingStyle.Quad), {
+		Transparency = 1,
+		Size = Vector3.new(0.4, size * 1.7, size * 1.7),
+	}):Play()
+	Debris:AddItem(s, Config.SplatLife + 0.1)
 
-		local pos = hrp.Position
-		local ci, cj = Config.worldToCell(pos.X, pos.Z)
-		local r = Config.BloomRadiusCells
-		for di = -r, r do
-			for dj = -r, r do
-				local tile = tileDict[(ci + di) .. "_" .. (cj + dj)]
-				if tile then
-					active[tile] = { color = target, expire = now + Config.ColorFadeTime }
-				end
-			end
-		end
-	end
-
-	-- Fade/color pass over the bounded active set.
-	for tile, info in active do
-		local remaining = info.expire - now
-		if remaining <= 0 then
-			tile.Color = base
-			active[tile] = nil
-		else
-			local a = remaining / Config.ColorFadeTime
-			tile.Color = base:Lerp(info.color, a)
-		end
+	table.insert(splats, s)
+	if #splats > Config.MaxSplats then
+		local old = table.remove(splats, 1)
+		if old then old:Destroy() end
 	end
 end
 
 -- ════════════════════════════════════════════════════════════
---  RING SPIN  (local visual)
--- ════════════════════════════════════════════════════════════
-local ringsFolder: Instance? = nil
-task.spawn(function()
-	local world = Workspace:WaitForChild("CloudWorld")
-	ringsFolder = world:WaitForChild("Rings")
-end)
-
--- ════════════════════════════════════════════════════════════
---  SPEED LINES  (local wind streaks when moving fast)
+--  SPEED LINES
 -- ════════════════════════════════════════════════════════════
 local speedEmitter: ParticleEmitter? = nil
-local function ensureSpeedEmitter()
-	local char = player.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-	if not hrp then
-		speedEmitter = nil
-		return
-	end
+local function ensureSpeedEmitter(hrp: BasePart)
 	if speedEmitter and speedEmitter.Parent == hrp then return end
 	local pe = Instance.new("ParticleEmitter")
 	pe.Texture = "rbxasset://textures/particles/smoke_main.dds"
 	pe.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-	pe.Transparency = NumberSequence.new(0.4, 1)
-	pe.Lifetime = NumberRange.new(0.2, 0.35)
+	pe.Transparency = NumberSequence.new(0.5, 1)
+	pe.Lifetime = NumberRange.new(0.18, 0.32)
 	pe.Rate = 0
 	pe.Speed = NumberRange.new(0)
-	pe.Size = NumberSequence.new(2.2, 0.2)
-	pe.LightEmission = 0.5
+	pe.Size = NumberSequence.new(2, 0.2)
+	pe.LightEmission = 0.4
 	pe.Parent = hrp
 	speedEmitter = pe
 end
 
 -- ════════════════════════════════════════════════════════════
+--  RING SPIN (tagged rings)
+-- ════════════════════════════════════════════════════════════
+local spinRings: { [BasePart]: boolean } = {}
+for _, r in CollectionService:GetTagged("CloudRing") do
+	if r:IsA("BasePart") then spinRings[r] = true end
+end
+CollectionService:GetInstanceAddedSignal("CloudRing"):Connect(function(r)
+	if r:IsA("BasePart") then spinRings[r] = true end
+end)
+CollectionService:GetInstanceRemovedSignal("CloudRing"):Connect(function(r)
+	spinRings[r :: BasePart] = nil
+end)
+
+-- ════════════════════════════════════════════════════════════
 --  EVENTS
 -- ════════════════════════════════════════════════════════════
-Net.RingCollected.OnClientEvent:Connect(function(data)
+Net.RingCollected.OnClientEvent:Connect(function(dataIn)
 	play(ringSound, 0.5, 1 + math.random() * 0.1)
-	burst(data.position, Color3.fromRGB(255, 216, 74), 16)
-	local ping = os.clock()
-	ringsLabel.TextSize = 30
-	task.delay(0.12, function()
-		if os.clock() - ping >= 0.1 then ringsLabel.TextSize = 22 end
-	end)
+	burst(dataIn.position, Color3.fromRGB(255, 210, 64), 16)
 end)
 
-Net.GateOpened.OnClientEvent:Connect(function(data)
-	play(gateSound, 0.8)
-	bigAnnounce(tostring(data.label):gsub("Gate_", "") .. " OPEN!", Color3.fromRGB(120, 255, 170))
-	if typeof(data.position) == "Vector3" then
-		burst(data.position, Color3.fromRGB(120, 255, 170), 40)
-	end
+Net.Milestone.OnClientEvent:Connect(function(dataIn)
+	play(milestoneSound, 0.8)
+	bigAnnounce(tostring(dataIn.label) .. "!", Color3.fromRGB(140, 230, 255))
 end)
 
--- Boost feedback (watch the shared state flip).
 local lastBoosting = false
 
 -- ════════════════════════════════════════════════════════════
@@ -263,38 +235,58 @@ RunService.RenderStepped:Connect(function(dt)
 	camera = camera or Workspace.CurrentCamera
 	if not camera then return end
 
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 	local runSpeed = ClientState.runSpeed
-	local topSpeed = math.max(ClientState.topSpeed, 1)
 
-	updateReactiveFloor(dt, runSpeed)
+	-- Sky orb follows + bobs.
+	if hrp then
+		local bob = math.sin(os.clock() * Config.OrbBobSpeed) * Config.OrbBobAmplitude
+		orb.CFrame = CFrame.new(hrp.Position + Config.OrbOffset + Vector3.new(0, bob, 0))
+	end
 
-	-- Spin rings.
-	if ringsFolder then
-		for _, ring in ringsFolder:GetChildren() do
-			if ring:IsA("BasePart") then
-				ring.CFrame = ring.CFrame * CFrame.Angles(0, dt * 3, 0)
+	-- Colour trail.
+	if hrp then
+		local pos = hrp.Position
+		if lastTrailPos then
+			local d = Vector2.new(pos.X - lastTrailPos.X, pos.Z - lastTrailPos.Z).Magnitude
+			hue += d * Config.HuePerStud
+			splatAccum += d
+			while splatAccum >= Config.SplatSpacing do
+				splatAccum -= Config.SplatSpacing
+				dropSplat(pos.X, pos.Z, runSpeed)
 			end
+		end
+		lastTrailPos = pos
+	end
+
+	-- Ring spin.
+	for ring in spinRings do
+		if ring.Parent then
+			ring.CFrame = ring.CFrame * CFrame.Angles(0, dt * 3, 0)
+		else
+			spinRings[ring] = nil
 		end
 	end
 
-	-- Speed lines scale with velocity.
-	ensureSpeedEmitter()
-	if speedEmitter then
-		local frac = math.clamp(runSpeed / topSpeed, 0, 1)
-		speedEmitter.Rate = frac > 0.5 and (frac - 0.5) * 120 or 0
+	-- Speed lines.
+	if hrp then
+		ensureSpeedEmitter(hrp)
+		if speedEmitter then
+			local frac = math.clamp(runSpeed / math.max(ClientState.topSpeed, 1), 0, 1)
+			speedEmitter.Rate = frac > 0.55 and (frac - 0.55) * 140 or 0
+		end
 	end
 
-	-- FOV kick from speed + boost.
-	local frac = math.clamp(runSpeed / Config.MaxTopSpeed, 0, 1)
-	local targetFov = Config.BaseFov + frac * 22 + (ClientState.boosting and Config.BoostFovKick or 0)
+	-- FOV from speed + boost.
+	local sf = math.clamp(runSpeed / Config.MaxTopSpeed, 0, 1)
+	local targetFov = Config.BaseFov + sf * Config.SpeedFovMax + (ClientState.boosting and Config.BoostFovKick or 0)
 	camera.FieldOfView += (targetFov - camera.FieldOfView) * math.min(1, dt * 6)
 
-	-- Boost sound edge-trigger.
 	if ClientState.boosting and not lastBoosting then
 		play(boostSound, 0.7)
 	end
 	lastBoosting = ClientState.boosting
 
-	-- Live velocity readout.
 	velLabel.Text = string.format("velocity  %d", math.floor(runSpeed))
 end)

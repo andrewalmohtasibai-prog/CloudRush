@@ -2,115 +2,136 @@
 --[[
 	CloudConfig
 	═══════════
-	Every tunable number for CLOUD RUSH. Change here → whole game re-balances.
+	Every tunable number for CLOUD RUSH.
 
-	The fusion:
-	  • Sonic feel   → momentum: accelerate to a high top speed, keep it, boost.
-	  • Keyboard loop → collect rings / run → +1 Speed (permanent) → higher top speed forever.
-	  • Cloud world  → a color-reactive sea of clouds you sprint across.
+	ARCHITECTURE (v2 — endless, no falling):
+	  • Each player stands on a LARGE ground disc that FOLLOWS them every frame,
+	    so the ground is always underfoot → you can never run off the edge, and it
+	    feels infinite.
+	  • A field of decorative cloud puffs sits in world space and WRAPS around the
+	    player (a "treadmill") beyond the fog line, so you feel like you're moving
+	    through an endless sky without ever seeing a hard edge.
+	  • The floor "reacts" via a world-space COLOR-SPLAT TRAIL dropped at your feet
+	    (hue cycling as you move) — this both looks better than recolouring tiles
+	    and works with a moving floor.
+	  • Keyboard-game loop: rings + running → +1 Speed (permanent) → higher top speed.
 ]]
 
 local Config = {}
 
 -- ════════════════════════════════════════════════════════════
---  MOVEMENT  (Sonic-style momentum)
+--  MOVEMENT (Sonic-style momentum)
 -- ════════════════════════════════════════════════════════════
-Config.BaseTopSpeed     = 26     -- top speed with 0 Speed stat
-Config.TopSpeedPerSpeed = 0.14   -- each point of the Speed stat raises top speed
-Config.MaxTopSpeed      = 320    -- hard cap so it stays controllable
-Config.Acceleration     = 55     -- studs/sec² ramp toward top speed while holding a direction
-Config.Friction         = 80     -- studs/sec² decel when you release input
-Config.TurnResponse     = 9      -- how snappily the run direction follows input (higher = snappier)
+Config.SpeedPerPound     = 1
 
-Config.JumpPower        = 55
+Config.BaseTopSpeed      = 24
+Config.TopSpeedPerSpeed  = 0.14
+Config.MaxTopSpeed       = 320
+Config.Acceleration      = 60     -- studs/sec² ramp toward top speed while holding input
+Config.Friction          = 95     -- studs/sec² decel when input released
+Config.JumpPower         = 55
 
 -- Boost / spin-dash
-Config.BoostSpeed       = 130    -- extra speed added by a boost
-Config.BoostDuration    = 0.55   -- seconds the boost lasts
-Config.BoostCooldown    = 1.1    -- seconds between boosts
-Config.BoostFovKick     = 22     -- FOV added during boost (whoosh feel)
-Config.BaseFov          = 70
+Config.BoostSpeed        = 130
+Config.BoostDuration     = 0.55
+Config.BoostCooldown     = 1.1
+Config.BaseFov           = 68
+Config.SpeedFovMax       = 20     -- extra FOV added as you approach MaxTopSpeed
+Config.BoostFovKick      = 16
 
 -- ════════════════════════════════════════════════════════════
---  RINGS  (the +1 Speed keyboard-loop currency)
+--  RINGS / SPEED GAIN (keyboard-game loop)
 -- ════════════════════════════════════════════════════════════
-Config.SpeedPerRing     = 1      -- +1 Speed per ring (your rule, Sonic-flavored)
-Config.CoinsPerRing     = 1
-Config.StudsPerSpeed    = 45     -- running this many studs also grants +1 Speed (movement is rewarded)
-Config.RingRespawn      = 5      -- seconds before a collected ring returns
-Config.RingCount        = 140    -- rings scattered across the cloud field
-Config.RingFloatHeight  = 3.2    -- how high rings hover above the clouds
+Config.SpeedPerRing      = 1
+Config.CoinsPerRing      = 1
+Config.StudsPerSpeed     = 45     -- running this far also grants +1 Speed
+Config.RingsPerPlayer    = 22     -- rings in each player's wrapping field
+Config.RingFieldHalf     = 150    -- half-width of the ring field (studs) around the player
+Config.RingFloatHeight   = 3.5
 
 -- ════════════════════════════════════════════════════════════
---  REACTIVE CLOUD FLOOR  (color changes as you move)
+--  GROUND (the following disc — "you can never fall")
 -- ════════════════════════════════════════════════════════════
-Config.FloorTiles       = 48     -- tiles per side (48×48 = 2,304 tiles)
-Config.TileSize         = 12      -- studs per tile
-Config.TileThickness    = 1
-Config.FloorTopY        = 0       -- top surface of the cloud floor
-Config.BaseTileColor    = Color3.fromRGB(248, 250, 255)  -- soft cloud white
-Config.BloomRadiusCells = 3       -- how many tiles around you light up
-Config.ColorFadeTime    = 1.6     -- seconds a colored tile takes to fade back to white
-Config.HuePerStud       = 0.0016  -- how fast the color cycles as you travel
-Config.TileSaturation   = 0.55
-Config.TileValue        = 1.0
+Config.GroundY           = 0
+Config.GroundRadius      = 600    -- must be bigger than the fog view distance
+Config.GroundThickness   = 4
+Config.GroundColor       = Color3.fromRGB(240, 245, 252)  -- soft cool cloud white (not pure white → keeps depth)
+Config.GroundFollowSnap  = 8      -- snap ground centre to this grid so it doesn't jitter
 
 -- ════════════════════════════════════════════════════════════
---  SPEED GATES  (keyboard-game "reach X to pass")
---  Ring pillars/arches that only open once your Speed stat is high enough.
+--  CLOUD SEA (wrapping decorative puffs → sense of endless motion)
 -- ════════════════════════════════════════════════════════════
-Config.SpeedGates = {
-	{ speed = 50,   label = "SKY GATE"    },
-	{ speed = 200,  label = "STORM GATE"  },
-	{ speed = 600,  label = "AURORA GATE" },
-	{ speed = 1500, label = "COSMIC GATE" },
+Config.PuffClusters      = 64
+Config.FieldHalf         = 420    -- puffs live within ±this of the player; they wrap
+                                  -- when farther, which is BEYOND the fog so pops are hidden
+Config.PuffMinY          = -55    -- some clouds sit below to read as "a sea below you"
+Config.PuffMaxY          = 30
+Config.PuffBallMin       = 20
+Config.PuffBallMax       = 52
+Config.PuffColorLow      = Color3.fromRGB(226, 235, 248)  -- shaded/base cloud
+Config.PuffColorHigh     = Color3.fromRGB(255, 255, 255)  -- sunlit top
+
+-- ════════════════════════════════════════════════════════════
+--  REACTIVE COLOR TRAIL (the "floor changes colour as you move")
+-- ════════════════════════════════════════════════════════════
+Config.SplatSpacing      = 6      -- drop a colour splat every N studs travelled
+Config.SplatLife         = 1.4    -- seconds a splat takes to fade out
+Config.SplatBaseSize     = 10
+Config.SplatSpeedSize    = 10     -- extra size at full speed
+Config.HuePerStud        = 0.0016 -- how fast the colour cycles as you run
+Config.SplatSaturation   = 0.55
+Config.SplatValue        = 1.0
+Config.MaxSplats         = 60     -- pool cap so the trail can't spam parts
+
+-- ════════════════════════════════════════════════════════════
+--  SKY ORB (client-side; follows the player so it's never left behind/cut off)
+-- ════════════════════════════════════════════════════════════
+Config.OrbSize           = 90
+Config.OrbOffset         = Vector3.new(0, 150, -340)  -- relative to the player, in world axes
+Config.OrbColor          = Color3.fromRGB(248, 246, 240)
+Config.OrbBobAmplitude   = 6
+Config.OrbBobSpeed       = 0.35
+
+-- ════════════════════════════════════════════════════════════
+--  SPEED MILESTONES (HUD celebration; was physical gates)
+-- ════════════════════════════════════════════════════════════
+Config.SpeedMilestones = {
+	{ speed = 50,   label = "SKY RUNNER" },
+	{ speed = 200,  label = "STORM CHASER" },
+	{ speed = 600,  label = "AURORA" },
+	{ speed = 1500, label = "COSMIC" },
 }
 
 -- ════════════════════════════════════════════════════════════
---  WORLD DECOR
+--  SPAWN
 -- ════════════════════════════════════════════════════════════
-Config.OrbSize          = 46
-Config.OrbHeight        = 70
-Config.OrbBobAmplitude  = 4
-Config.OrbBobSpeed      = 0.4
-Config.CloudPuffCount   = 90     -- decorative floating cloud blobs
+Config.SpawnHeight       = 5      -- studs above the ground disc
+Config.SpawnFacing       = Vector3.new(0, 0, 1)  -- character looks +Z on spawn
 
 -- ════════════════════════════════════════════════════════════
---  SOUNDS  (paste your own asset ids; 0 = silent, still works)
+--  SOUNDS (paste your own asset ids; 0 = silent, still works)
 -- ════════════════════════════════════════════════════════════
 Config.Sounds = {
-	Ring  = "rbxassetid://0",  -- classic ring "ching"
-	Boost = "rbxassetid://0",  -- whoosh
-	Gate  = "rbxassetid://0",  -- gate opens
+	Ring  = "rbxassetid://0",
+	Boost = "rbxassetid://0",
+	Milestone = "rbxassetid://0",
+	Music = "rbxassetid://0",
 }
 
 -- ════════════════════════════════════════════════════════════
 --  HELPERS
 -- ════════════════════════════════════════════════════════════
-
--- Top speed for a given accumulated Speed stat.
 function Config.getTopSpeed(speed: number): number
 	return math.min(Config.BaseTopSpeed + speed * Config.TopSpeedPerSpeed, Config.MaxTopSpeed)
 end
 
--- Grid-cell → world XZ of that tile's centre.
-function Config.cellCenter(i: number, j: number): (number, number)
-	local half = Config.FloorTiles / 2
-	local x = (i - half + 0.5) * Config.TileSize
-	local z = (j - half + 0.5) * Config.TileSize
-	return x, z
-end
-
--- World XZ → grid cell.
-function Config.worldToCell(x: number, z: number): (number, number)
-	local half = Config.FloorTiles / 2
-	local i = math.floor(x / Config.TileSize + half)
-	local j = math.floor(z / Config.TileSize + half)
-	return i, j
-end
-
-function Config.floorHalfExtent(): number
-	return Config.FloorTiles * Config.TileSize * 0.5
+-- Wrap a world coordinate into the range [-half, half] relative to a centre,
+-- used to keep decorative items within a window around the player.
+function Config.wrapAround(value: number, center: number, half: number): number
+	local size = half * 2
+	local d = value - center
+	d = ((d + half) % size + size) % size - half
+	return center + d
 end
 
 return Config
