@@ -2,16 +2,17 @@
 --[[
 	ClientState
 	═══════════
-	A tiny shared table for the client's LocalScripts. Because a ModuleScript is
-	cached per-VM, both MovementController and CloudFX get the SAME table — so the
-	movement script can publish the live run speed and the FX script can read it,
-	with zero networking.
+	Shared table between the client LocalScripts (same VM → same table).
+	MovementController publishes; CloudFX reads. Zero networking.
 ]]
 
 local ClientState = {
-	runSpeed = 0,   -- current momentum speed (studs/s)
-	topSpeed = 0,   -- current max, from the Speed stat
-	boosting = false,
+	runSpeed = 0,      -- current ground speed magnitude (studs/s)
+	topSpeed = 0,      -- current effective top speed
+	boosting = false,  -- true briefly on a spindash launch (drives FOV kick + launch SFX)
+	charging = false,  -- true while charging a spindash (drives the rev pitch-ladder SFX)
+	chargeLevel = 0,   -- 0..SpindashMaxCharge
+	rolling = false,   -- true while rolling
 }
 
 return ClientState

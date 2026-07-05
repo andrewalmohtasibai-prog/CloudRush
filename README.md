@@ -19,10 +19,16 @@ colour as you move**. Collect rings and just *keep running* to permanently raise
 | Dreamy, reactive world | your cloud reference | Colour-splat trail + Future lighting |
 | See other players | Roblox social | Shared sky + everyone's colour speed **Trail** |
 
-## Controls
-- **Move:** WASD / thumbstick (hold to build momentum)
+## Controls (authentic Sonic physics)
+- **Move:** WASD / thumbstick — real momentum: accelerate, skid when you turn hard, coast when you let go
 - **Jump:** Space / A
-- **Boost:** Left Shift / R2 / on-screen **BOOST** button
+- **Spindash (charge & launch):** hold **Left Shift / R2 / CHARGE** to rev (pitch rises), **release** to fire
+- **Roll:** **Left Ctrl / B / ROLL** — keep momentum, can't accelerate while rolling
+
+> Movement is a custom velocity controller adapting the [Sonic Physics Guide](https://info.sonicretro.org/Sonic_Physics_Guide)
+> (constants in `SonicPhysics.luau`). It's a first pass to **play-test and tune** — and
+> run animations need a follow-up (the character slides until we add custom anims).
+> 360° slope/loop physics are dormant until the world has ramps.
 
 ---
 

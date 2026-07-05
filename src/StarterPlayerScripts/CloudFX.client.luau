@@ -37,8 +37,10 @@ local function makeSound(id: string): Sound
 	return s
 end
 local ringSound = makeSound(Config.Sounds.Ring)
-local boostSound = makeSound(Config.Sounds.Boost)
+local launchSound = makeSound(Config.Sounds.Launch)
 local milestoneSound = makeSound(Config.Sounds.Milestone)
+local chargeSound = makeSound(Config.Sounds.Charge)
+chargeSound.Looped = true
 
 local function play(sound: Sound, volume: number, pitch: number?)
 	if sound.SoundId == "" or sound.SoundId == "rbxassetid://0" then return end
@@ -283,10 +285,21 @@ RunService.RenderStepped:Connect(function(dt)
 	local targetFov = Config.BaseFov + sf * Config.SpeedFovMax + (ClientState.boosting and Config.BoostFovKick or 0)
 	camera.FieldOfView += (targetFov - camera.FieldOfView) * math.min(1, dt * 6)
 
+	-- Spindash launch = the brief "boosting" flag.
 	if ClientState.boosting and not lastBoosting then
-		play(boostSound, 0.7)
+		play(launchSound, 0.8)
 	end
 	lastBoosting = ClientState.boosting
+
+	-- Spindash charge: rev whose PITCH LADDERS UP with charge (the ASMR hook).
+	if ClientState.charging then
+		if chargeSound.SoundId ~= "" and chargeSound.SoundId ~= "rbxassetid://0" then
+			if not chargeSound.IsPlaying then chargeSound.Volume = 0.5; chargeSound:Play() end
+			chargeSound.PlaybackSpeed = 1 + (ClientState.chargeLevel / Config.SpindashMaxCharge) * 1.6
+		end
+	elseif chargeSound.IsPlaying then
+		chargeSound:Stop()
+	end
 
 	velLabel.Text = string.format("velocity  %d", math.floor(runSpeed))
 end)
